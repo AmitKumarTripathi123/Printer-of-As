@@ -13,8 +13,12 @@ from flask import (Flask, abort, g, jsonify, redirect, render_template_string,
 from pypdf import PdfReader, PdfWriter
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-UPLOADS = os.path.join(BASE, "uploads")
-DB = os.path.join(BASE, "jobs.db")
+# Vercel Functions mount the deployed project as read-only.  Local development
+# keeps runtime data beside the app, while a serverless deployment must write
+# only to its temporary directory.
+RUNTIME_DIR = "/tmp" if os.environ.get("VERCEL") else BASE
+UPLOADS = os.path.join(RUNTIME_DIR, "uploads")
+DB = os.path.join(RUNTIME_DIR, "jobs.db")
 os.makedirs(UPLOADS, exist_ok=True)
 
 CURRENCY = "₹"

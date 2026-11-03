@@ -28,6 +28,14 @@ Open [http://localhost:5001](http://localhost:5001).
 
 The app stores queued PDFs in `uploads/` and job data in `jobs.db`. Both are created automatically and intentionally ignored by Git.
 
+## Deploying to Vercel
+
+Vercel automatically detects this project as a Flask application because it exposes `app` from `app.py` and lists its dependencies in `requirements.txt`; no custom start command or `vercel.json` is required.
+
+Add `PI_TOKEN` as an environment variable in **Vercel → Project Settings → Environment Variables**, then redeploy. The application automatically writes temporary runtime files to Vercel's writable `/tmp` directory instead of the read-only deployment directory.
+
+> `/tmp` is temporary and is not shared between all function instances. It is enough to run the demo without a startup error, but it is not suitable for a real print queue: uploaded PDFs and job records can disappear or be unavailable to another function instance. For a production deployment, use durable object storage for PDFs and a hosted database for jobs.
+
 ## Print workflow
 
 1. Upload one or more PDFs. Multiple files are merged into one job.
