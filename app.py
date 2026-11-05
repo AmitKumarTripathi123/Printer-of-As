@@ -6,10 +6,12 @@ Open: http://localhost:5001
 import os
 import sqlite3
 import uuid
+from io import BytesIO
 from datetime import datetime, timezone
 
 from flask import (Flask, abort, g, jsonify, redirect, render_template_string,
                    request, send_file, url_for)
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from pypdf import PdfReader, PdfWriter
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +27,7 @@ CURRENCY = "₹"
 PRICE_PER_PAGE = {"bw": 2.0, "color": 8.0}
 MAX_PAGES = 100
 PI_TOKEN = os.environ.get("PI_TOKEN", "change-me")
+IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
@@ -65,13 +68,42 @@ def price(pages, copies, color):
     return round(pages * copies * PRICE_PER_PAGE.get(color, 2.0), 2)
 
 
+def is_pdf_upload(file_storage):
+    return file_storage.filename.lower().endswith(".pdf")
+
+
+def is_supported_upload(file_storage):
+    return is_pdf_upload(file_storage) or os.path.splitext(file_storage.filename.lower())[1] in IMAGE_EXTENSIONS
+
+
+def image_to_pdf(image_file):
+    """Turn an uploaded image (including animated images) into PDF page(s)."""
+    image_file.stream.seek(0)
+    with Image.open(image_file.stream) as image:
+        pages = []
+        for frame in ImageSequence.Iterator(image):
+            # PDFs do not support transparency, so composite it onto white first.
+            rgba = frame.convert("RGBA")
+            page = Image.new("RGB", rgba.size, "white")
+            page.paste(rgba, mask=rgba.getchannel("A"))
+            pages.append(page)
+
+    if not pages:
+        raise UnidentifiedImageError("Image has no frames")
+
+    output = BytesIO()
+    pages[0].save(output, format="PDF", save_all=True, append_images=pages[1:], resolution=100.0)
+    output.seek(0)
+    return output
+
+
 # ---------- Base Page Template ----------
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Printer of A's — Upload PDF</title>
+  <title>Printer of A's — Upload Files</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1179,7 +1211,7 @@ PAGE_TEMPLATE = """<!doctype html>
       </div>
     </div>
     <div class="preview-scroll-area" id="preview-pages-container"></div>
-    <iframe id="preview-fallback-frame" class="preview-fallback-frame" style="display: none;" title="PDF Preview"></iframe>
+    <iframe id="preview-fallback-frame" class="preview-fallback-frame" style="display: none;" title="Print Preview"></iframe>
   </dialog>
 
   <script>
@@ -1221,17 +1253,41 @@ PAGE_TEMPLATE = """<!doctype html>
 
           for (let fIdx = 0; fIdx < source.length; fIdx++) {
             const file = source[fIdx];
-            const arrayBuf = await file.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
-            const pdf = await loadingTask.promise;
-            totalPagesAcrossDocs += pdf.numPages;
+            const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
             if (source.length > 1) {
               const divHeader = document.createElement('div');
               divHeader.className = 'pdf-doc-divider';
-              divHeader.innerHTML = `<span>Document ${fIdx + 1} of ${source.length}: <strong>${file.name}</strong> (${pdf.numPages} ${pdf.numPages === 1 ? 'page' : 'pages'})</span>`;
+              divHeader.innerHTML = `<span>Document ${fIdx + 1} of ${source.length}: <strong>${file.name}</strong></span>`;
               container.appendChild(divHeader);
             }
+
+            if (!isPdf) {
+              const imageUrl = URL.createObjectURL(file);
+              const card = document.createElement('div');
+              card.className = 'pdf-page-card';
+              const img = document.createElement('img');
+              img.className = 'pdf-page-canvas';
+              img.alt = `Preview of ${file.name}`;
+              const numBadge = document.createElement('div');
+              numBadge.className = 'pdf-page-number';
+              numBadge.textContent = source.length > 1 ? `${file.name} · image` : 'Image';
+              card.appendChild(img);
+              card.appendChild(numBadge);
+              container.appendChild(card);
+              await new Promise((resolve, reject) => {
+                img.onload = () => { URL.revokeObjectURL(imageUrl); resolve(); };
+                img.onerror = () => { URL.revokeObjectURL(imageUrl); reject(new Error('Could not preview image')); };
+                img.src = imageUrl;
+              });
+              totalPagesAcrossDocs += 1;
+              continue;
+            }
+
+            const arrayBuf = await file.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
+            const pdf = await loadingTask.promise;
+            totalPagesAcrossDocs += pdf.numPages;
 
             for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
               const page = await pdf.getPage(pageNum);
@@ -1260,7 +1316,7 @@ PAGE_TEMPLATE = """<!doctype html>
           pagePill.textContent = `${totalPagesAcrossDocs} ${totalPagesAcrossDocs === 1 ? 'Page' : 'Pages'}`;
         } catch (err) {
           console.warn('PDF.js rendering fallback for multiple files:', err);
-          container.innerHTML = '<div style="color: #F87171; padding: 24px; text-align: center; font-weight: 600;">Could not render preview for one or more files. Please check that each file is a valid PDF.</div>';
+          container.innerHTML = '<div style="color: #F87171; padding: 24px; text-align: center; font-weight: 600;">Could not render preview for one or more files. Please check that each file is a valid PDF or image.</div>';
         }
         return;
       }
@@ -1355,8 +1411,8 @@ def index():
 
       <!-- LEFT: Upload Panel -->
       <div class="home-left">
-        <h1 class="page-title" style="font-size: 2.6rem; margin-bottom: 6px;">Upload your PDF</h1>
-        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 28px;">Select one or more documents — merged into a single print job.</p>
+        <h1 class="page-title" style="font-size: 2.6rem; margin-bottom: 6px;">Upload your files</h1>
+        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 28px;">Select PDFs or images — merged into a single print job.</p>
 
         {% if error %}
         <div class="alert-err">{{ error }}</div>
@@ -1364,9 +1420,9 @@ def index():
 
         <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form" onsubmit="return validateBeforeSubmit()">
           <!-- Dedicated file picker input -->
-          <input type="file" id="file-picker" accept="application/pdf" multiple style="display: none;" onchange="handlePickerFiles(this)">
+          <input type="file" id="file-picker" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" multiple style="display: none;" onchange="handlePickerFiles(this)">
           <!-- Form submission input synced via DataTransfer -->
-          <input type="file" id="file-input" name="files" accept="application/pdf" multiple style="display: none;">
+          <input type="file" id="file-input" name="files" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" multiple style="display: none;">
 
           <!-- Dropzone -->
           <div class="dropzone card-upload" id="dropzone" onclick="triggerFilePicker()" style="padding: 52px 20px; margin-bottom: 20px;">
@@ -1377,8 +1433,8 @@ def index():
                 <line x1="12" y1="3" x2="12" y2="15"></line>
               </svg>
             </div>
-            <div class="dropzone-text" id="dropzone-main-text">Click to choose PDF files or drag them here</div>
-            <div class="dropzone-sub" style="margin-top: 6px;">Select one or multiple documents · Merged into 1 print queue item</div>
+            <div class="dropzone-text" id="dropzone-main-text">Click to choose PDFs or images, or drag them here</div>
+            <div class="dropzone-sub" style="margin-top: 6px;">PDF, PNG, JPG, WEBP, GIF, BMP and TIFF · Merged into 1 print queue item</div>
           </div>
 
           <!-- Selected Documents Card -->
@@ -1423,7 +1479,7 @@ def index():
               <span class="step-number">1</span>
               <div class="step-content">
                 <strong>Select &amp; Preview Documents</strong>
-                <p>Drag or choose single or multiple PDFs. Preview all rendered pages before submitting.</p>
+                <p>Drag or choose PDFs and images. Preview your files before submitting.</p>
               </div>
             </li>
             <li class="step-item">
@@ -1501,7 +1557,11 @@ def index():
       function addFiles(filesList) {
         for (let i = 0; i < filesList.length; i++) {
           const file = filesList[i];
-          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+          const fileName = file.name.toLowerCase();
+          const isPdf = file.type === 'application/pdf' || fileName.endsWith('.pdf');
+          const isImage = /^image\/(bmp|gif|jpeg|png|tiff|webp)$/.test(file.type)
+            || /\.(bmp|gif|jpe?g|png|tiff?|webp)$/.test(fileName);
+          if (isPdf || isImage) {
             const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified);
             if (!exists) {
               selectedFiles.push(file);
@@ -1532,13 +1592,13 @@ def index():
         if (selectedFiles.length === 0) {
           card.style.display = 'none';
           submitBtn.style.display = 'none';
-          dropzoneText.textContent = 'Click to choose PDF files or drag them here';
+          dropzoneText.textContent = 'Click to choose PDFs or images, or drag them here';
           return;
         }
 
         card.style.display = 'block';
         submitBtn.style.display = 'inline-flex';
-        dropzoneText.textContent = '+ Drop or click to add more PDFs';
+        dropzoneText.textContent = '+ Drop or click to add more files';
 
         listContainer.innerHTML = '';
         let totalBytes = 0;
@@ -1588,7 +1648,7 @@ def index():
 
       function validateBeforeSubmit() {
         if (selectedFiles.length === 0) {
-          alert('Please choose at least one PDF file before continuing.');
+          alert('Please choose at least one PDF or image file before continuing.');
           return false;
         }
         return true;
@@ -1626,16 +1686,16 @@ def upload():
     files = request.files.getlist("files")
     if not files or not any(f.filename for f in files):
         files = request.files.getlist("file")
-    valid_files = [f for f in files if f and f.filename and f.filename.lower().endswith(".pdf")]
+    valid_files = [f for f in files if f and f.filename and is_supported_upload(f)]
     if not valid_files:
-        return redirect(url_for("index", error="Please choose at least one valid PDF file."))
+        return redirect(url_for("index", error="Please choose at least one valid PDF or image file."))
 
     job_id = uuid.uuid4().hex[:10]
     stored = f"{job_id}.pdf"
     path = os.path.join(UPLOADS, stored)
 
     try:
-        if len(valid_files) == 1:
+        if len(valid_files) == 1 and is_pdf_upload(valid_files[0]):
             valid_files[0].save(path)
             display_name = os.path.basename(valid_files[0].filename)
             notes = ""
@@ -1645,17 +1705,29 @@ def upload():
             for f in valid_files:
                 orig_name = os.path.basename(f.filename)
                 file_names.append(orig_name)
-                writer.append(f.stream)
+                if is_pdf_upload(f):
+                    f.stream.seek(0)
+                    writer.append(f.stream)
+                else:
+                    writer.append(image_to_pdf(f))
             writer.write(path)
-            if len(file_names) == 2:
+            if len(file_names) == 1:
+                display_name = file_names[0]
+                notes = ""
+            elif len(file_names) == 2:
                 display_name = f"{file_names[0]} + {file_names[1]}"
+                notes = ", ".join(file_names)
             else:
                 display_name = f"{file_names[0]} (+{len(file_names)-1} documents)"
-            notes = ", ".join(file_names)
+                notes = ", ".join(file_names)
+    except (OSError, UnidentifiedImageError, ValueError, TypeError):
+        if os.path.exists(path):
+            os.remove(path)
+        return redirect(url_for("index", error="Could not read an uploaded file. Please ensure every PDF or image is valid."))
     except Exception:
         if os.path.exists(path):
             os.remove(path)
-        return redirect(url_for("index", error="Could not read or merge the uploaded PDF files. Please ensure they are valid PDFs."))
+        return redirect(url_for("index", error="Could not read or merge the uploaded files. Please ensure every PDF or image is valid."))
 
     try:
         pages = len(PdfReader(path).pages)
@@ -1841,7 +1913,7 @@ def queue():
           <h1 class="page-title" style="font-size: 1.9rem;">Print Queue</h1>
           <p class="page-sub" style="margin-bottom: 0;">Jobs are processed oldest first.</p>
         </div>
-        <a href="/" class="btn-secondary">+ Upload PDF</a>
+        <a href="/" class="btn-secondary">+ Upload Files</a>
       </div>
 
       {% if not rows %}

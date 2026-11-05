@@ -1,10 +1,10 @@
 # Printer of A's
 
-A lightweight, dark-themed PDF print-kiosk application. Upload one or more PDFs, review the job and price, then send it to a queue that a Raspberry Pi print worker can process.
+A lightweight, dark-themed print-kiosk application. Upload PDFs or common image files, review the job and price, then send it to a queue that a Raspberry Pi print worker can process.
 
 ## Features
 
-- Upload and merge one or more PDF documents into one print job
+- Upload and merge PDFs, PNG, JPG/JPEG, WEBP, GIF, BMP, and TIFF files into one print job
 - Preview the selected document before confirming
 - Select black-and-white or colour printing, copies, and duplex mode
 - Calculate pricing automatically
@@ -38,7 +38,7 @@ Add `PI_TOKEN` as an environment variable in **Vercel → Project Settings → E
 
 ## Print workflow
 
-1. Upload one or more PDFs. Multiple files are merged into one job.
+1. Upload one or more PDFs or images. Images are converted to PDF pages and all files are merged into one job.
 2. Preview the document and set its colour mode, copy count, and duplex preference.
 3. Confirm the simulated payment to place the job in the queue.
 4. A worker polls the API, downloads the queued PDF, sends it to the printer, and reports the final status.
