@@ -13,6 +13,12 @@ from flask import (Flask, abort, g, jsonify, redirect, render_template_string,
                    request, send_file, url_for)
 from PIL import Image, ImageSequence, UnidentifiedImageError
 from pypdf import PdfReader, PdfWriter
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()   # teaches Pillow to open HEIC / HEIF files
+    HEIC_SUPPORTED = True
+except ImportError:
+    HEIC_SUPPORTED = False
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 # Vercel Functions mount the deployed project as read-only.  Local development
@@ -27,7 +33,7 @@ CURRENCY = "₹"
 PRICE_PER_PAGE = {"bw": 2.0, "color": 8.0}
 MAX_PAGES = 100
 PI_TOKEN = os.environ.get("PI_TOKEN", "change-me")
-IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+IMAGE_EXTENSIONS = {".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
@@ -1420,7 +1426,7 @@ def index():
 
         <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form" onsubmit="return handleFormSubmit(event)">
           <!-- Single file picker input (also acts as the form field via FormData) -->
-          <input type="file" id="file-picker" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" multiple style="display: none;" onchange="handlePickerFiles(this)">
+          <input type="file" id="file-picker" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,image/heic,image/heif,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.heic,.heif" multiple style="display: none;" onchange="handlePickerFiles(this)">
 
           <!-- Dropzone -->
           <div class="dropzone card-upload" id="dropzone" onclick="triggerFilePicker()" style="padding: 52px 20px; margin-bottom: 20px;">
@@ -1432,7 +1438,7 @@ def index():
               </svg>
             </div>
             <div class="dropzone-text" id="dropzone-main-text">Click to choose PDFs or images, or drag them here</div>
-            <div class="dropzone-sub" style="margin-top: 6px;">PDF, PNG, JPG, WEBP, GIF, BMP and TIFF · Merged into 1 print queue item</div>
+            <div class="dropzone-sub" style="margin-top: 6px;">PDF, PNG, JPG, WEBP, HEIC, GIF, BMP and TIFF · Merged into 1 print queue item</div>
           </div>
 
           <!-- Selected Documents Card -->
@@ -1568,8 +1574,8 @@ def index():
           const file = filesList[i];
           const fileName = file.name.toLowerCase();
           const isPdf = file.type === 'application/pdf' || fileName.endsWith('.pdf');
-          const isImage = /^image\/(bmp|gif|jpeg|png|tiff|webp)$/.test(file.type)
-            || /\.(bmp|gif|jpe?g|png|tiff?|webp)$/.test(fileName);
+          const isImage = /^image\/(bmp|gif|heic|heif|jpeg|png|tiff|webp)$/.test(file.type)
+            || /\.(bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/.test(fileName);
           if (isPdf || isImage) {
             const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified);
             if (!exists) {
