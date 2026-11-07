@@ -1462,6 +1462,17 @@ def index():
             </svg>
           </button>
         </form>
+
+        <!-- Privacy Notice -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 12px 16px; background: rgba(141, 235, 181, 0.05); border: 1px solid rgba(141, 235, 181, 0.15); border-radius: 8px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8DEBB5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <p style="margin: 0; font-size: 12.5px; color: #A0A6AD; line-height: 1.5;">
+            <span style="color: #8DEBB5; font-weight: 700;">Your privacy is respected.</span>
+            We don't store your documents — files are deleted immediately after printing.
+          </p>
+        </div>
       </div>
 
       <!-- RIGHT: How It Works + Key Benefits -->
