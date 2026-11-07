@@ -773,7 +773,7 @@ PAGE_TEMPLATE = """<!doctype html>
       border-radius: 8px;
       background: #18191C;
       color: #FFFFFF;
-      width: 90vw;
+      width: 95vw;
       max-width: 940px;
       height: 85vh;
       max-height: 850px;
@@ -1418,11 +1418,9 @@ def index():
         <div class="alert-err">{{ error }}</div>
         {% endif %}
 
-        <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form" onsubmit="return validateBeforeSubmit()">
-          <!-- Dedicated file picker input -->
+        <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form" onsubmit="return handleFormSubmit(event)">
+          <!-- Single file picker input (also acts as the form field via FormData) -->
           <input type="file" id="file-picker" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" multiple style="display: none;" onchange="handlePickerFiles(this)">
-          <!-- Form submission input synced via DataTransfer -->
-          <input type="file" id="file-input" name="files" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" multiple style="display: none;">
 
           <!-- Dropzone -->
           <div class="dropzone card-upload" id="dropzone" onclick="triggerFilePicker()" style="padding: 52px 20px; margin-bottom: 20px;">
@@ -1577,11 +1575,6 @@ def index():
       }
 
       function syncInputAndUI() {
-        const fileInput = document.getElementById('file-input');
-        const dt = new DataTransfer();
-        selectedFiles.forEach(f => dt.items.add(f));
-        fileInput.files = dt.files;
-
         const card = document.getElementById('file-selected-card');
         const listContainer = document.getElementById('file-list-container');
         const summaryText = document.getElementById('file-summary-text');
@@ -1644,6 +1637,42 @@ def index():
             : `${selectedFiles.length} Documents Preview`;
           openPdfViewer(selectedFiles, title);
         }
+      }
+
+      function handleFormSubmit(event) {
+        event.preventDefault();
+        if (selectedFiles.length === 0) {
+          alert('Please choose at least one PDF or image file before continuing.');
+          return false;
+        }
+        // Build FormData manually from selectedFiles array —
+        // avoids the iOS Safari DataTransfer.items bug where
+        // programmatic fileInput.files assignment is not supported.
+        const submitBtn = document.getElementById('btn-submit');
+        const submitText = document.getElementById('btn-submit-text');
+        submitBtn.disabled = true;
+        submitText.textContent = 'Uploading…';
+
+        const fd = new FormData();
+        selectedFiles.forEach(f => fd.append('files', f, f.name));
+
+        fetch('/upload', { method: 'POST', body: fd })
+          .then(res => {
+            if (res.redirected) {
+              window.location.href = res.url;
+            } else if (res.ok) {
+              return res.text().then(() => { window.location.href = res.url || '/'; });
+            } else {
+              return res.text().then(text => { throw new Error(text || 'Upload failed'); });
+            }
+          })
+          .catch(err => {
+            console.error(err);
+            submitBtn.disabled = false;
+            submitText.textContent = 'Continue with ' + (selectedFiles.length === 1 ? '1 document' : selectedFiles.length + ' documents');
+            alert('Upload failed. Please check your files and try again.');
+          });
+        return false;
       }
 
       function validateBeforeSubmit() {
