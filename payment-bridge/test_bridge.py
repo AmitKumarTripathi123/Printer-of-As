@@ -81,8 +81,20 @@ def test_sms_parser():
 
     return all_passed
 
+def load_env_file():
+    for env_path in [".env", "../.env"]:
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        if k.strip() not in os.environ:
+                            os.environ[k.strip()] = v.strip()
+
 def test_supabase_integration():
     print("\n--- [TEST 2] Verifying Supabase Live Connection & Reconciliation ---")
+    load_env_file()
     supabase_url = os.getenv("SUPABASE_URL")
     service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -98,24 +110,24 @@ def test_supabase_integration():
 
     # 1. Create a dummy pending print job with unique paise (e.g. ₹6.03)
     test_job_id = f"TEST_JOB_{int(datetime.now().timestamp())}"
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     mock_job = {
         "id": test_job_id,
-        "kiosk_id": "KIOSK_01",
-        "file_name": "resume.pdf",
-        "page_count": 2,
-        "base_amount": 6.00,
+        "filename": "test_document.pdf",
+        "pages": 2,
+        "copies": 1,
+        "color": "bw",
+        "duplex": 0,
+        "amount": 6.03,
         "reserved_paise_offset": 3,
-        "final_amount": 6.03,
-        "payment_status": "PENDING",
-        "print_status": "QUEUED",
-        "expires_at": expires_at
+        "status": "pending_payment",
+        "created": now_iso
     }
 
     try:
-        print(f"1. Creating mock pending print job in Supabase ({test_job_id}) for ₹6.03...")
-        bridge._request("print_jobs", method="POST", data=mock_job)
-        print("   ✅ Job created successfully.")
+        print(f"1. Creating mock pending print job in Supabase table 'jobs' ({test_job_id}) for ₹6.03...")
+        bridge._request("jobs", method="POST", data=mock_job)
+        print("   ✅ Job created successfully in Supabase.")
 
         # 2. Simulate incoming bank SMS with ₹6.03
         mock_sms = f"Dear SBI User, A/C ...1234 credited by Rs. 6.03 on 16Nov26 by UPI:889900112233. Ref no 889900112233"

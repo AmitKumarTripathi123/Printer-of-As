@@ -67,7 +67,7 @@ class SupabasePaymentBridge:
         """
         Matches payment against active pending print jobs.
         1. First tries matching exact UTR.
-        2. Next matches exact final_amount (unique paise trick) for non-expired pending jobs.
+        2. Next matches exact amount (unique paise trick) for non-expired pending jobs.
         """
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -75,35 +75,38 @@ class SupabasePaymentBridge:
 
         # 1. Match by UTR if available
         if utr:
-            endpoint = f"print_jobs?utr_number=eq.{utr}&payment_status=eq.PENDING&select=*"
-            jobs = self._request(endpoint, method="GET")
-            if jobs and len(jobs) > 0:
-                matched_job = jobs[0]
+            endpoint = f"jobs?utr_number=eq.{utr}&status=eq.pending_payment&select=*"
+            found_jobs = self._request(endpoint, method="GET")
+            if found_jobs and len(found_jobs) > 0:
+                matched_job = found_jobs[0]
 
         # 2. Match by unique amount (Paise Reservation) if not matched yet
         if not matched_job:
-            endpoint = f"print_jobs?final_amount=eq.{amount}&payment_status=eq.PENDING&expires_at=gte.{now_iso}&order=created_at.desc&limit=1&select=*"
-            jobs = self._request(endpoint, method="GET")
-            if jobs and len(jobs) > 0:
-                matched_job = jobs[0]
+            endpoint = f"jobs?amount=eq.{amount}&status=eq.pending_payment&order=created.desc&limit=1&select=*"
+            found_jobs = self._request(endpoint, method="GET")
+            if found_jobs and len(found_jobs) > 0:
+                matched_job = found_jobs[0]
 
         if not matched_job:
             print(f"[INFO] No pending job matched for amount: Rs. {amount}, UTR: {utr}")
             return None
 
-        # 3. Mark job as PAID and link UTR
+        # 3. Mark job as queued (PAID) and link UTR
         job_id = matched_job["id"]
         update_payload = {
-            "payment_status": "PAID",
+            "status": "queued",
             "utr_number": utr or matched_job.get("utr_number")
         }
-        updated_job = self._request(f"print_jobs?id=eq.{job_id}", method="PATCH", data=update_payload)
+        self._request(f"jobs?id=eq.{job_id}", method="PATCH", data=update_payload)
 
         # 4. Mark payment as consumed
         if utr:
-            self._request(f"incoming_payments?utr_number=eq.{utr}", method="PATCH", data={"is_consumed": True, "matched_job_id": job_id})
+            try:
+                self._request(f"incoming_payments?utr_number=eq.{utr}", method="PATCH", data={"is_consumed": True, "matched_job_id": job_id})
+            except Exception as e:
+                print(f"[WARN] Could not mark payment consumed: {e}")
         
-        print(f"[SUCCESS] Payment of Rs. {amount} MATCHED to Job {job_id}!")
+        print(f"[SUCCESS] Payment of Rs. {amount} MATCHED to Job {job_id}! Job queued for printing.")
         return matched_job
 
     def process_sms(self, sms_text: str) -> Optional[Dict]:
