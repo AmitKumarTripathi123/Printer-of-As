@@ -1,9 +1,9 @@
-# Secrets
+# Environment & Secrets
 .env
 *.env
 seen_sms_ids.txt
 
-# Python
+# Python & Virtualenv
 __pycache__/
 *.py[cod]
 *$py.class
@@ -13,3 +13,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime print-job data
+jobs.db
+uploads/
