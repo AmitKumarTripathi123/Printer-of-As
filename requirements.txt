@@ -1,4 +1,6 @@
 flask
+gunicorn
 pillow
 pillow-heif
 pypdf
+
