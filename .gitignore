@@ -1,0 +1,15 @@
+# Secrets
+.env
+*.env
+seen_sms_ids.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
